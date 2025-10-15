@@ -873,10 +873,15 @@
           introOffsetInput.value = String(state.introOffsetBeats);
           updateGridStartBeat(state.totalBeats);
         }
+        if (Array.isArray(state.pendingIntroNotes)) {
+          state.introNotes = state.pendingIntroNotes.map((note) => (typeof note === 'string' ? note : ''));
+          ensureIntroNotesSize(Math.max(0, Math.floor(state.introOffsetBeats || 0)));
+        }
         state.pendingBeats = null;
         state.pendingAnchors = null;
         state.pendingDetectionInfo = null;
         state.pendingIntroOffsetBeats = null;
+        state.pendingIntroNotes = null;
         updateDetectionStatus();
       }
 
@@ -1145,6 +1150,15 @@
       function handleCellInput(event) {
         const cell = event.target.closest('td.beat-cell');
         if (!cell) return;
+        if (cell.dataset.intro === 'true') {
+          const introIndex = Number.parseInt(cell.dataset.beatIndex, 10);
+          if (!Number.isFinite(introIndex) || introIndex < 0) return;
+          const targetIntroBeats = Math.max(0, Math.floor(state.introOffsetBeats || 0));
+          ensureIntroNotesSize(targetIntroBeats);
+          state.introNotes[introIndex] = cell.textContent.trim();
+          queueSave();
+          return;
+        }
         const phraseIdx = Number.parseInt(cell.dataset.phrase, 10);
         const beatNumber = Number.parseInt(cell.dataset.beatNumber, 10) - 1;
         if (!Number.isFinite(phraseIdx) || !Number.isFinite(beatNumber)) return;
@@ -1661,6 +1675,12 @@
         const key = getStorageKey();
         if (!key) return;
         const manualAnchors = Array.isArray(state.anchors) ? state.anchors.filter((anchor) => anchor.manual) : [];
+        const introBeats = Math.max(0, Math.floor(state.introOffsetBeats || 0));
+        ensureIntroNotesSize(introBeats);
+        const introNotesSlice = introBeats > 0
+          ? state.introNotes.slice(0, introBeats).map((note) => (typeof note === 'string' ? note : ''))
+          : null;
+        const hasIntroNotes = Array.isArray(introNotesSlice) && introNotesSlice.some((note) => note && note.length > 0);
         const trackDurationSeconds = Number.isFinite(audio.duration)
           ? Number(audio.duration.toFixed(6))
           : (Number.isFinite(state.waveformDuration) ? Number(state.waveformDuration.toFixed(6)) : null);
@@ -1694,6 +1714,7 @@
           anchors: manualAnchors.length > 0
             ? manualAnchors.map((anchor) => ({ beat: anchor.beat, time: Number(anchor.time.toFixed(6)) }))
             : undefined,
+          introNotes: hasIntroNotes ? introNotesSlice : undefined,
         };
         state.savedTrackInfo = {
           trackId: state.trackId || null,
@@ -1755,6 +1776,13 @@
             state.introOffsetBeats = Math.max(0, parsed.meta.introOffsetBeats);
           }
           introOffsetInput.value = String(state.introOffsetBeats);
+
+          if (Array.isArray(parsed.introNotes)) {
+            state.introNotes = parsed.introNotes.map((note) => (typeof note === 'string' ? note : ''));
+          } else {
+            state.introNotes = [];
+          }
+          ensureIntroNotesSize(Math.max(0, Math.floor(state.introOffsetBeats || 0)));
 
           if (Array.isArray(parsed.beats) && parsed.beats.length > 0) {
             const detectedFlag = parsed.meta && typeof parsed.meta.detected === 'boolean' ? parsed.meta.detected : true;
@@ -1852,6 +1880,12 @@
 
       function exportJson() {
         const manualAnchors = Array.isArray(state.anchors) ? state.anchors.filter((anchor) => anchor.manual) : [];
+        const introBeats = Math.max(0, Math.floor(state.introOffsetBeats || 0));
+        ensureIntroNotesSize(introBeats);
+        const introNotesSlice = introBeats > 0
+          ? state.introNotes.slice(0, introBeats).map((note) => (typeof note === 'string' ? note : ''))
+          : null;
+        const hasIntroNotes = Array.isArray(introNotesSlice) && introNotesSlice.some((note) => note && note.length > 0);
         const trackDurationSeconds = Number.isFinite(audio.duration)
           ? Number(audio.duration.toFixed(6))
           : (Number.isFinite(state.waveformDuration) ? Number(state.waveformDuration.toFixed(6)) : null);
@@ -1884,6 +1918,7 @@
           anchors: manualAnchors.length > 0
             ? manualAnchors.map((anchor) => ({ beat: anchor.beat, time: Number(anchor.time.toFixed(6)) }))
             : undefined,
+          introNotes: hasIntroNotes ? introNotesSlice : undefined,
         };
         downloadFile(`${state.trackId || 'cheer-counts'}.json`, JSON.stringify(payload, null, 2), 'application/json');
       }
@@ -1978,6 +2013,9 @@
             state.pendingImport = Array.isArray(phrases) ? phrases : null;
             state.pendingBeats = hasBeats ? beats : null;
             state.pendingAnchors = Array.isArray(anchors) && anchors.length > 0 ? anchors : null;
+            state.pendingIntroNotes = Array.isArray(parsed.introNotes)
+              ? parsed.introNotes.map((note) => (typeof note === 'string' ? note : ''))
+              : null;
 
             if (Number.isFinite(audio.duration) && audio.duration > 0) {
               applyPendingTimingFromImport();
